@@ -39,12 +39,23 @@ export function readClientKeys(): ClientKeys {
   }
 }
 
+/** No-ops rather than throwing when storage is unavailable (SSR, private mode). */
 export function writeClientKeys(keys: ClientKeys): void {
-  window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(keys));
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(keys));
+  } catch {
+    // A full or blocked store must not take down the settings drawer.
+  }
 }
 
 export function clearClientKeys(): void {
-  window.sessionStorage.removeItem(STORAGE_KEY);
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Nothing to recover from: the keys are session-scoped either way.
+  }
 }
 
 export function hasVoiceKeys(keys: ClientKeys): boolean {
