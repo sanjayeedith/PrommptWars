@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MEMORY_CATEGORIES } from "./memory";
+import { MEMORY_CATEGORIES } from "./categories";
 
 /**
  * Request contracts for the memory API routes.

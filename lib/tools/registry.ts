@@ -9,6 +9,7 @@
 
 import { z } from "zod";
 import { RESOURCE_TOPICS } from "../resources";
+import { MEMORY_CATEGORIES } from "../categories";
 
 export const TOOL_NAMES = [
   "start_grounding",
@@ -46,6 +47,6 @@ export const toolSchemas = {
   }),
   remember_this: z.object({
     fact: z.string().min(1).max(500),
-    category: z.enum(["trigger", "reason", "support_person", "coping", "win"]),
+    category: z.enum(MEMORY_CATEGORIES),
   }),
 } satisfies Record<ToolName, z.ZodTypeAny>;

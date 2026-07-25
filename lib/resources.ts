@@ -98,5 +98,9 @@ export const RESOURCES: Record<ResourceTopic, Resource> = {
 /** Returns the vetted resource for a topic, or null when the topic is unknown. */
 export function getResource(topic: unknown): Resource | null {
   if (typeof topic !== "string") return null;
-  return RESOURCES[topic as ResourceTopic] ?? null;
+  // Own-property check: a plain index lookup resolves inherited names like
+  // "constructor" and "toString" to Object.prototype members, which would put a
+  // malformed panel on screen instead of failing closed.
+  if (!Object.hasOwn(RESOURCES, topic)) return null;
+  return RESOURCES[topic as ResourceTopic];
 }
