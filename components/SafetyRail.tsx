@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { LifeBuoy, Share2, ShieldCheck } from "lucide-react";
 
 /**
@@ -82,9 +82,14 @@ export default function SafetyRail() {
   const [card, setCard] = useState<SafetyCard | null>(null);
   const [shareNote, setShareNote] = useState("");
 
-  useEffect(() => {
-    if (open) setCard(readSafetyCard());
-  }, [open]);
+  // Re-read on open rather than in an effect, so the card is always current
+  // without triggering a second render pass every time the rail expands.
+  const toggle = () => {
+    setOpen((wasOpen) => {
+      if (!wasOpen) setCard(readSafetyCard());
+      return !wasOpen;
+    });
+  };
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--line)] bg-[var(--bg)]/95 backdrop-blur">
@@ -165,7 +170,7 @@ export default function SafetyRail() {
         <button
           type="button"
           aria-expanded={open}
-          onClick={() => setOpen((o) => !o)}
+          onClick={toggle}
           className="inline-flex items-center gap-2 rounded-lg border border-[var(--line)] px-4 py-3 text-[var(--ink)] hover:bg-[var(--surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
         >
           <ShieldCheck className="size-5" aria-hidden />

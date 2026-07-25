@@ -11,12 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Mic } from "lucide-react";
 import { dispatchTool, type DispatchContext, type StagePanel } from "@/lib/tools/dispatch";
 import { appendReading, readingFrom, type EmotionReading } from "@/lib/prosody";
-import {
-  EMPTY_KEYS,
-  hasVoiceKeys,
-  readClientKeys,
-  type ClientKeys,
-} from "@/lib/client-keys";
+import { hasVoiceKeys, readClientKeys, type ClientKeys } from "@/lib/client-keys";
 import Stage from "./stage/Stage";
 import SafetyRail, { persistSafetyCard } from "./SafetyRail";
 import Controls from "./Controls";
@@ -66,6 +61,14 @@ function readOrCreateUserId(): string {
     return created;
   } catch {
     return crypto.randomUUID();
+  }
+}
+
+function readChatGroupId(): string | undefined {
+  try {
+    return window.localStorage.getItem(CHAT_GROUP_KEY) ?? undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -281,12 +284,17 @@ export default function Anchor({
   accessToken: string;
   serverConfigId?: string;
 }) {
-  const [userId, setUserId] = useState("");
+  // Anchor is imported with `ssr: false`, so browser storage is readable on the
+  // very first render. Lazy initialisers avoid a second render pass and keep
+  // these reads out of an effect.
+  const [userId] = useState(readOrCreateUserId);
   const [snapshot, setSnapshot] = useState<Snapshot>(EMPTY);
   const [panel, setPanel] = useState<StagePanel>({ kind: "idle" });
   const [captions, setCaptions] = useState("");
-  const [chatGroupId, setChatGroupId] = useState<string | undefined>(undefined);
-  const [keys, setKeys] = useState<ClientKeys>(EMPTY_KEYS);
+  // Read once at mount to resume the previous chat. Later group IDs are written
+  // straight to localStorage by handleMessage and picked up on the next visit.
+  const [chatGroupId] = useState<string | undefined>(readChatGroupId);
+  const [keys, setKeys] = useState<ClientKeys>(readClientKeys);
   const [accessToken, setAccessToken] = useState(serverToken);
   const [activity, setActivity] = useState<AgentActivity>("idle");
   const [voiceError, setVoiceError] = useState("");
@@ -301,9 +309,14 @@ export default function Anchor({
   // before React re-renders with the new state.
   const voiceErrorRef = useRef("");
 
-  snapshotRef.current = snapshot;
-  userIdRef.current = userId;
-  keysRef.current = keys;
+  // The tool-call and memory handlers are long-lived callbacks handed to the
+  // voice socket, so they read the latest values through refs instead of being
+  // rebuilt (and re-registered) on every state change.
+  useEffect(() => {
+    snapshotRef.current = snapshot;
+    userIdRef.current = userId;
+    keysRef.current = keys;
+  }, [snapshot, userId, keys]);
 
   const configId = keys.humeConfigId || serverConfigId || process.env.NEXT_PUBLIC_HUME_CONFIG_ID || "";
 
@@ -381,18 +394,23 @@ export default function Anchor({
   }, [serverToken]);
 
   useEffect(() => {
-    const id = readOrCreateUserId();
-    setUserId(id);
-    setChatGroupId(window.localStorage.getItem(CHAT_GROUP_KEY) ?? undefined);
     const stored = readClientKeys();
-    setKeys(stored);
-    void loadProfile(id, stored.supermemoryApiKey);
-    if (hasVoiceKeys(stored)) {
-      void mintToken(stored);
-    } else if (serverToken) {
-      setAccessToken(serverToken);
-    }
-  }, [loadProfile, mintToken, serverToken]);
+    let cancelled = false;
+    // Deferred to a microtask so the effect body performs no synchronous state
+    // update; the loading indicators these kick off would otherwise cascade an
+    // extra render during the mount flush.
+    queueMicrotask(() => {
+      if (cancelled) return;
+      void loadProfile(userId, stored.supermemoryApiKey);
+      if (hasVoiceKeys(stored)) void mintToken(stored);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Runs once on mount: the server token is already the initial state, and
+    // client-pasted keys re-mint through onKeysSaved instead.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onKeysSaved = useCallback(
     (next: ClientKeys) => {

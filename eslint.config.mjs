@@ -5,7 +5,7 @@ import typescript from "eslint-config-next/typescript";
  * ESLint 9 flat config. eslint-config-next ships native flat-config arrays, so
  * these are spread directly rather than bridged through FlatCompat.
  */
-export default [
+const config = [
   {
     ignores: [
       ".next/**",
@@ -25,4 +25,11 @@ export default [
       "object-shorthand": ["warn", "properties"],
     },
   },
+  {
+    // Provisioning CLI: its stdout is the interface, so logging is the point.
+    files: ["scripts/**/*.mjs"],
+    rules: { "no-console": "off" },
+  },
 ];
+
+export default config;

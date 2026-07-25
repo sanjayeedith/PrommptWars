@@ -15,14 +15,18 @@ export default function UrgeSurf({
   minutes: number;
   reassurance: string;
 }) {
-  const total = minutes * 60;
+  // Keyed on the duration so a new timer length remounts with a fresh count
+  // rather than resetting state from inside an effect.
+  return <Countdown key={minutes} total={minutes * 60} reassurance={reassurance} />;
+}
+
+function Countdown({ total, reassurance }: { total: number; reassurance: string }) {
   const [remaining, setRemaining] = useState(total);
 
   useEffect(() => {
-    setRemaining(total);
     const timer = window.setInterval(() => setRemaining((r) => Math.max(0, r - 1)), 1000);
     return () => window.clearInterval(timer);
-  }, [total]);
+  }, []);
 
   const progress = total === 0 ? 1 : 1 - remaining / total;
   const finished = remaining === 0;

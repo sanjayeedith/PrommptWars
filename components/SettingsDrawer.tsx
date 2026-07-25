@@ -78,14 +78,12 @@ function Field({
 export default function SettingsDrawer({ onSaved }: Props) {
   const titleId = useId();
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState<ClientKeys>(EMPTY_KEYS);
+  // Lazy initialiser: the drawer only renders client-side, so sessionStorage is
+  // available on first render and no effect-driven state sync is needed.
+  const [draft, setDraft] = useState<ClientKeys>(readClientKeys);
   const [status, setStatus] = useState<"idle" | "saved" | "cleared">("idle");
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    setDraft(readClientKeys());
-  }, []);
 
   useEffect(() => {
     if (!open) return;
