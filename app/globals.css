@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+/* Hallmark · atmospheric night-harbor tokens
+ * Soft teal accent = safety without alarm. Deep blue-green field = night
+ * companion energy. No purple, no cream/terracotta.
+ */
+
+@theme {
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: var(--accent);
+  --color-background: var(--bg);
+  --color-foreground: var(--ink);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-contrast);
+  --color-secondary: var(--surface-2);
+  --color-secondary-foreground: var(--ink);
+  --color-destructive: oklch(0.62 0.18 25);
+  --color-destructive-foreground: oklch(0.98 0.01 95);
+  --color-muted: var(--surface-2);
+  --color-muted-foreground: var(--ink-soft);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-contrast);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--ink);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--ink);
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --radius-lg: 1rem;
+  --radius-md: 0.75rem;
+  --radius-sm: 0.5rem;
+}
+
+@layer base {
+  :root {
+    --bg: oklch(0.14 0.02 225);
+    --surface: oklch(0.2 0.02 220);
+    --surface-2: oklch(0.24 0.022 215);
+    --ink: oklch(0.96 0.01 95);
+    --ink-soft: oklch(0.82 0.02 210);
+    --ink-faint: oklch(0.68 0.02 210);
+    --line: oklch(0.35 0.02 210 / 0.55);
+    --accent: oklch(0.78 0.1 175);
+    --accent-contrast: oklch(0.18 0.03 200);
+    --accent-soft: oklch(0.35 0.05 175 / 0.35);
+    --accent-ink: oklch(0.88 0.06 175);
+    --accent-ring: oklch(0.78 0.1 175 / 0.45);
+    --crisis: oklch(0.62 0.18 25);
+    --crisis-ink: oklch(0.98 0.01 95);
+    --shadow-soft: 0 12px 40px oklch(0.1 0.02 230 / 0.35);
+    --shadow-panel: 8px 0 40px oklch(0.08 0.02 230 / 0.45);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
