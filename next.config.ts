@@ -9,6 +9,12 @@ import type { NextConfig } from "next";
  */
 const isDev = process.env.NODE_ENV !== "production";
 
+// EVI streams assistant audio through an AudioWorklet whose module the SDK
+// fetches from Google Cloud Storage. A worklet module is a script resource, so
+// it needs script-src (plus worker-src/connect-src for browsers that check
+// those). Scoped to the SDK's asset prefix rather than the whole bucket host.
+const HUME_AUDIO_WORKLET = "https://storage.googleapis.com/evi-react-sdk-assets/";
+
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
@@ -23,14 +29,14 @@ const securityHeaders = [
     value: [
       "default-src 'self'",
       isDev
-        ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
-        : "script-src 'self' 'unsafe-inline'",
+        ? `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${HUME_AUDIO_WORKLET}`
+        : `script-src 'self' 'unsafe-inline' ${HUME_AUDIO_WORKLET}`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "font-src 'self' data:",
       "media-src 'self' blob:",
-      "worker-src 'self' blob:",
-      "connect-src 'self' https://api.hume.ai wss://api.hume.ai ws://localhost:3000 wss://localhost:3000",
+      `worker-src 'self' blob: ${HUME_AUDIO_WORKLET}`,
+      `connect-src 'self' https://api.hume.ai wss://api.hume.ai ws://localhost:3000 wss://localhost:3000 ${HUME_AUDIO_WORKLET}`,
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

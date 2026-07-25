@@ -5,9 +5,10 @@ import {
   useVoice,
   type JSONMessage,
   type ToolCallHandler,
+  type VoiceProviderProps,
 } from "@humeai/voice-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Mic, Send } from "lucide-react";
+import { Mic } from "lucide-react";
 import { dispatchTool, type DispatchContext, type StagePanel } from "@/lib/tools/dispatch";
 import { appendReading, readingFrom, type EmotionReading } from "@/lib/prosody";
 import {
@@ -34,10 +35,27 @@ const USER_ID_KEY = "anchor.user-id";
 const CHAT_GROUP_KEY = "anchor.chat-group-id";
 const PROSODY_SAMPLE_MS = 1200;
 const DISTRESS_THRESHOLD = 0.6;
+// EVI's socket never settles its connect promise if it closes before
+// chat_metadata arrives (bad token, wrong config ID), so we bound the wait.
+const CONNECT_TIMEOUT_MS = 15_000;
 
 type Snapshot = DispatchContext & { contextText: string; triggers: string[] };
+type VoiceError = Parameters<NonNullable<VoiceProviderProps["onError"]>>[0];
 
 const EMPTY: Snapshot = { contextText: "", reasons: [], triggers: [], contacts: [] };
+
+/** Turns an EVI failure into something a person in distress can act on. */
+function messageForError(error: VoiceError): string {
+  if (error.type === "mic_error") {
+    return error.reason === "mic_permission_denied"
+      ? "Microphone access is blocked. Allow the mic for this site in your browser's address bar, then press Talk again. You can still type below."
+      : "The microphone could not start. Close anything else using it, then press Talk again. You can still type below.";
+  }
+  if (error.type === "audio_error") {
+    return "Audio playback could not start. Reload the page and try again — captions below still work.";
+  }
+  return "The voice session could not connect. Check your Hume keys and config ID in Settings, then try again.";
+}
 
 function readOrCreateUserId(): string {
   try {
@@ -66,6 +84,9 @@ function Session({
   captions,
   chatGroupId,
   activity,
+  voiceError,
+  readVoiceError,
+  reportVoiceError,
 }: {
   accessToken: string;
   configId: string;
@@ -75,12 +96,19 @@ function Session({
   captions: string;
   chatGroupId?: string;
   activity: AgentActivity;
+  voiceError: string;
+  readVoiceError: () => string;
+  reportVoiceError: (message: string) => void;
 }) {
-  const { connect, status, sendSessionSettings, sendUserInput, isPlaying, mute, unmute } =
-    useVoice();
-  const [typed, setTyped] = useState("");
-  // Default OFF so voice sessions keep the mic live. Enable only for quiet typing.
-  const [preferText, setPreferText] = useState(false);
+  const {
+    connect,
+    disconnect,
+    status,
+    sendSessionSettings,
+    isPlaying,
+    mute,
+    unmute,
+  } = useVoice();
   const [busy, setBusy] = useState(false);
   const connectingRef = useRef(false);
   const connected = status.value === "connected";
@@ -106,13 +134,42 @@ function Session({
       if (!canConnect || connected || connectingRef.current) return false;
       connectingRef.current = true;
       setBusy(true);
+      reportVoiceError("");
       const shouldMute = opts?.muteMic === true;
+      let timer = 0;
+
       try {
-        await connect({
+        // connect() resolves on success and reports every failure through the
+        // provider's onError instead of rejecting, so try/catch cannot see a
+        // failed mic permission or a rejected token. Read the error channel and
+        // bound the wait rather than trusting the promise.
+        const settled = connect({
           auth: { type: "accessToken", value: accessToken },
           configId,
           resumedChatGroupId: chatGroupId,
+        }).then(
+          () => "settled" as const,
+          () => "settled" as const,
+        );
+        const timedOut = new Promise<"timeout">((resolve) => {
+          timer = window.setTimeout(() => resolve("timeout"), CONNECT_TIMEOUT_MS);
         });
+
+        if ((await Promise.race([settled, timedOut])) === "timeout") {
+          await disconnect();
+          reportVoiceError(
+            "Anchor could not reach the voice service in time. Check your connection and your Hume config ID, then try again.",
+          );
+          return false;
+        }
+
+        if (readVoiceError()) {
+          // onError already wrote a human-readable reason; release the mic and
+          // audio resources so the next attempt starts clean.
+          await disconnect();
+          return false;
+        }
+
         // Only mute when the caller explicitly asked (typed-send path or quiet checkbox).
         // Voice start must unmute — otherwise the OS mic drops ~immediately after connect.
         if (shouldMute) {
@@ -121,9 +178,8 @@ function Session({
           unmute();
         }
         return true;
-      } catch {
-        return false;
       } finally {
+        window.clearTimeout(timer);
         connectingRef.current = false;
         setBusy(false);
       }
@@ -135,28 +191,13 @@ function Session({
       configId,
       connect,
       connected,
+      disconnect,
       mute,
+      readVoiceError,
+      reportVoiceError,
       unmute,
     ],
   );
-
-  const sendTyped = useCallback(async () => {
-    const text = typed.trim();
-    if (!text || !canConnect) return;
-    setBusy(true);
-    try {
-      if (!connected) {
-        // Text-only connect: mute mic so the browser indicator does not flash.
-        const ok = await start({ muteMic: true });
-        if (!ok) return;
-        await new Promise((resolve) => window.setTimeout(resolve, 350));
-      }
-      sendUserInput(text);
-      setTyped("");
-    } finally {
-      setBusy(false);
-    }
-  }, [canConnect, connected, sendUserInput, start, typed]);
 
   return (
     <div className="relative mx-auto flex w-full max-w-3xl flex-col gap-7 px-4 pb-44 pt-20">
@@ -168,7 +209,7 @@ function Session({
           Anchor
         </h1>
         <p className="mx-auto mt-3 max-w-md text-base leading-relaxed text-[var(--ink-soft)]">
-          Press Talk to speak, or type below without using the mic.
+          Press Talk and just say what is going on. Captions appear below.
         </p>
       </header>
 
@@ -184,32 +225,31 @@ function Session({
         </p>
       ) : null}
 
+      {voiceError ? (
+        <p
+          role="alert"
+          className="rounded-2xl border border-[var(--crisis)]/50 bg-[var(--crisis)]/10 px-4 py-3 text-center text-sm text-[var(--ink)]"
+        >
+          {voiceError}
+        </p>
+      ) : null}
+
       <div className="flex flex-col items-center gap-3">
         {!connected ? (
           <button
             type="button"
             disabled={!canConnect || busy}
-            onClick={() => void start({ muteMic: preferText })}
+            onClick={() => void start()}
             className="group inline-flex items-center gap-3 rounded-full border border-[var(--line)] bg-[var(--surface)] px-9 py-6 text-xl font-medium text-[var(--ink)] shadow-[var(--shadow-soft)] transition hover:border-[var(--accent)] hover:bg-[var(--surface-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Mic className="size-6 transition group-hover:scale-105" aria-hidden />
-            {busy ? "Connecting…" : preferText ? "Start (mic muted)" : "Talk to Anchor"}
+            {busy ? "Connecting…" : "Talk to Anchor"}
           </button>
         ) : (
           <p className="rounded-full border border-[var(--accent)]/40 bg-[var(--accent-soft)] px-4 py-2 text-sm text-[var(--accent-ink)]">
             Session live — mic stays on unless you mute it in the bar below. End Call to hang up.
           </p>
         )}
-
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-[var(--ink-soft)]">
-          <input
-            type="checkbox"
-            checked={preferText}
-            onChange={(event) => setPreferText(event.target.checked)}
-            className="size-4 accent-[var(--accent)]"
-          />
-          Quiet start — mute microphone (for typing only)
-        </label>
       </div>
 
       <Stage panel={panel} />
@@ -222,41 +262,6 @@ function Session({
           {captions || "Captions appear here, so this works with the sound off."}
         </p>
       </section>
-
-      {/* Always visible in development so you never need to speak to exercise tools. */}
-      <form
-        className="flex flex-col gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void sendTyped();
-        }}
-      >
-        <label htmlFor="typed-input" className="text-sm font-medium text-[var(--ink-soft)]">
-          Type to Anchor (no speaking required)
-        </label>
-        <div className="flex gap-2">
-          <input
-            id="typed-input"
-            value={typed}
-            disabled={!canConnect || busy}
-            onChange={(event) => setTyped(event.target.value)}
-            placeholder={
-              connected
-                ? "e.g. I'm at a party and I really want to use"
-                : "Type a message — connects automatically on send"
-            }
-            className="flex-1 rounded-2xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[var(--ink)] outline-none focus-visible:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent-ring)] disabled:opacity-50"
-          />
-          <button
-            type="submit"
-            disabled={!canConnect || busy || !typed.trim()}
-            className="rounded-2xl bg-[var(--accent)] px-4 font-semibold text-[var(--accent-contrast)] hover:brightness-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] disabled:opacity-40"
-          >
-            <Send className="size-5" aria-hidden />
-            <span className="sr-only">Send</span>
-          </button>
-        </div>
-      </form>
 
       <p className="text-center text-xs text-[var(--ink-faint)]">
         Anchor is not a therapist, a doctor, or an emergency service. Anonymous ID{" "}
@@ -284,6 +289,7 @@ export default function Anchor({
   const [keys, setKeys] = useState<ClientKeys>(EMPTY_KEYS);
   const [accessToken, setAccessToken] = useState(serverToken);
   const [activity, setActivity] = useState<AgentActivity>("idle");
+  const [voiceError, setVoiceError] = useState("");
 
   const snapshotRef = useRef<Snapshot>(EMPTY);
   const userIdRef = useRef("");
@@ -291,12 +297,34 @@ export default function Anchor({
   const lastProsodyAt = useRef(0);
   const readings = useRef<EmotionReading[]>([]);
   const pendingNudge = useRef<string | null>(null);
+  // Mirrored in a ref because onError fires synchronously inside connect(),
+  // before React re-renders with the new state.
+  const voiceErrorRef = useRef("");
 
   snapshotRef.current = snapshot;
   userIdRef.current = userId;
   keysRef.current = keys;
 
   const configId = keys.humeConfigId || serverConfigId || process.env.NEXT_PUBLIC_HUME_CONFIG_ID || "";
+
+  const reportVoiceError = useCallback((message: string) => {
+    voiceErrorRef.current = message;
+    setVoiceError(message);
+  }, []);
+
+  const readVoiceError = useCallback(() => voiceErrorRef.current, []);
+
+  const onVoiceError = useCallback(
+    (error: VoiceError) => {
+      reportVoiceError(messageForError(error));
+      setActivity("idle");
+    },
+    [reportVoiceError],
+  );
+
+  const onVoiceOpen = useCallback(() => {
+    reportVoiceError("");
+  }, [reportVoiceError]);
 
   const loadProfile = useCallback(async (id: string, supermemoryApiKey: string) => {
     setActivity("searching");
@@ -448,7 +476,12 @@ export default function Anchor({
   return (
     <>
       <SettingsDrawer onSaved={onKeysSaved} />
-      <VoiceProvider onToolCall={handleToolCall} onMessage={handleMessage}>
+      <VoiceProvider
+        onToolCall={handleToolCall}
+        onMessage={handleMessage}
+        onError={onVoiceError}
+        onOpen={onVoiceOpen}
+      >
         <Session
           accessToken={accessToken}
           configId={configId}
@@ -458,6 +491,9 @@ export default function Anchor({
           captions={captions}
           chatGroupId={chatGroupId}
           activity={activity}
+          voiceError={voiceError}
+          readVoiceError={readVoiceError}
+          reportVoiceError={reportVoiceError}
         />
       </VoiceProvider>
     </>
