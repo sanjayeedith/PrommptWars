@@ -9,15 +9,7 @@ import Supermemory from "supermemory";
  * personalisation is acceptable and losing the crisis tool is not.
  */
 
-export const MEMORY_CATEGORIES = [
-  "trigger",
-  "reason",
-  "support_person",
-  "coping",
-  "win",
-] as const;
-
-export type MemoryCategory = (typeof MEMORY_CATEGORIES)[number];
+export { MEMORY_CATEGORIES, type MemoryCategory } from "./categories";
 
 export type SupportContact = { name: string; phone: string | null };
 
